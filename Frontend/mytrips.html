@@ -3,78 +3,210 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>View My Trips</title>
+    <title>My Trips</title>
+    
+    <!-- Bootstrap & Leaflet CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Custom Styles -->
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .trip-card {
+            border-radius: 12px;
+            padding: 20px;
+            background: #fff;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        .trip-card img {
+            width: 100%;
+            height: 180px;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+        .map-container {
+            height: 500px;
+            border-radius: 12px;
+        }
+    </style>
 </head>
-<body class="bg-light">
+<body>
 
-    <div class="container mt-5">
-        <h2 class="text-center">My Saved Trips</h2>
+    <div class="container mt-4">
+        <h2 class="text-center mb-4">My Saved Trips</h2>
 
-        <!-- Trips List -->
-        <div class="mt-4">
-            <ul id="tripsList" class="list-group"></ul>
+        <div class="row">
+            <!-- Left Column: Trip List -->
+            <div class="col-md-4">
+                <ul id="tripsList" class="list-group"></ul>
+                <button id="generateItinerary" class="btn btn-primary w-100 mt-3">Generate Itinerary</button>
+            </div>
+
+            <!-- Right Column: Map -->
+            <div class="col-md-8">
+                <div id="mainMap" class="map-container"></div>
+                <div id="itineraryDetails" class="mt-3"></div>
+            </div>
         </div>
     </div>
 
+    <!-- Leaflet & Bootstrap JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.4.1/leaflet.markercluster.js"></script>
+
     <script>
-const API_URL = "http://127.0.0.1:8000/trips/savedtrips"; // FastAPI Backend URL
+        const TRIPS_API_URL = "http://127.0.0.1:8000/trips/savedtrips";
+        const ITINERARY_API_URL = "http://127.0.0.1:8000/trips/generateitinerary";
+        let sessionId = localStorage.getItem("session_id");
 
-// Get session ID from localStorage
-let sessionId = localStorage.getItem("session_id");
-
-if (!sessionId) {
-    alert("No session found! Please plan a trip first.");
-    window.location.href = "index.html"; // Redirect if no session
-}
-
-// Fetch trips for the current session
-async function loadTrips() {
-    try {
-        const response = await fetch(API_URL, {
-            method: "POST", // ✅ Change to POST
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ session_id: sessionId }) // ✅ Send session_id as JSON
-        });
-
-        if (!response.ok) {
-            throw new Error("Failed to fetch trips");
+        if (!sessionId) {
+            alert("No session found! Please plan a trip first.");
+            window.location.href = "index.html";
         }
 
-        const trips = await response.json();
-        const tripsList = document.getElementById("tripsList");
-        tripsList.innerHTML = ""; // Clear list
+        let mainMap = L.map("mainMap").setView([20.5937, 78.9629], 5); // Centered in India
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            attribution: "&copy; OpenStreetMap contributors"
+        }).addTo(mainMap);
+        let markers = L.markerClusterGroup();
 
-        if (trips.length === 0) {
-            tripsList.innerHTML = `<li class="list-group-item">No trips found.</li>`;
-            return;
+        async function loadTrips() {
+            try {
+                const response = await fetch(TRIPS_API_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+
+                if (!response.ok) {
+                    throw new Error("Failed to fetch trips");
+                }
+
+                const trips = await response.json();
+                const tripsList = document.getElementById("tripsList");
+                tripsList.innerHTML = "";
+
+                if (trips.length === 0) {
+                    tripsList.innerHTML = `<li class="list-group-item">No trips found.</li>`;
+                    return;
+                }
+
+                let bounds = [];
+
+                trips.forEach(async (trip, index) => {
+                    const li = document.createElement("li");
+                    li.className = "list-group-item trip-card";
+
+                    const createdAt = new Date(trip.created_at).toLocaleString();
+
+                    li.innerHTML = `
+                        <div>
+                            <img src="https://source.unsplash.com/400x200/?${trip.destination}" alt="${trip.destination}">
+                            <h5 class="mt-2">${trip.destination}</h5>
+                            <p><strong>From:</strong> ${trip.startdate} <br><strong>To:</strong> ${trip.enddate}</p>
+                            <p><strong>Budget:</strong> $${trip.budget} | <strong>Travelers:</strong> ${trip.travelers}</p>
+                            <p><strong>Activities:</strong> ${trip.activities.join(", ")}</p>
+                            <small><em>Created on: ${createdAt}</em></small>
+                        </div>
+                    `;
+
+                    tripsList.appendChild(li);
+                    await addMarker(trip.destination, trip, bounds);
+                });
+
+            } catch (error) {
+                console.error("Error fetching trips:", error);
+                alert("Failed to load trips!");
+            }
         }
 
-        trips.forEach(trip => {
-            const li = document.createElement("li");
-            li.className = "list-group-item";
+        async function addMarker(destination, trip, bounds) {
+            try {
+                const geoResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}`);
+                const geoData = await geoResponse.json();
 
-            // Format `created_at`
-            const createdAt = new Date(trip.created_at).toLocaleString();
+                if (geoData.length === 0) {
+                    console.warn("Location not found:", destination);
+                    return;
+                }
 
-            li.innerHTML = `
-                <strong>${trip.destination}</strong> - ${trip.date} (${trip.days} days) - $${trip.budget}
-                <br><small>Travelers: ${trip.travelers} | Activities: ${trip.activities.join(", ")}</small>
-                <br><small><em>Created on: ${createdAt}</em></small>
+                const { lat, lon } = geoData[0];
+
+                let marker = L.marker([lat, lon]).bindPopup(`    
+                    <b>${trip.destination}</b><br>
+                    <strong>From:</strong> ${trip.startdate} <br>
+                    <strong>To:</strong> ${trip.enddate} <br>
+                    <strong>Budget:</strong> $${trip.budget} <br>
+                    <strong>Travelers:</strong> ${trip.travelers}
+                `);
+
+                markers.addLayer(marker);
+                bounds.push([lat, lon]);
+
+                if (bounds.length > 0) {
+                    mainMap.fitBounds(bounds);
+                }
+
+            } catch (error) {
+                console.error("Error fetching map data:", error);
+            }
+        }
+
+        async function generateItinerary() {
+            try {
+                const response = await fetch(ITINERARY_API_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+
+                if (!response.ok) {
+                    throw new Error("Failed to fetch itinerary");
+                }
+
+                const data = await response.json();
+                displayItinerary(data.itinerary);
+                plotItineraryOnMap(data.itinerary.attractions);
+
+            } catch (error) {
+                console.error("Error fetching itinerary:", error);
+                alert("Failed to load itinerary!");
+            }
+        }
+
+        function displayItinerary(itinerary) {
+            document.getElementById("itineraryDetails").innerHTML = `
+                <h4>${itinerary.location_name}</h4>
+                <p>${itinerary.location_description}</p>
+                <h5>Best Time to Visit:</h5>
+                <p>${itinerary.ideal_visit_time}</p>
             `;
+        }
 
-            tripsList.appendChild(li);
-        });
-    } catch (error) {
-        console.error("Error fetching trips:", error);
-        alert("Failed to load trips!");
-    }
-}
+        function plotItineraryOnMap(attractions) {
+            markers.clearLayers();
+            let bounds = [];
 
-// Load trips when page loads
-loadTrips();
+            attractions.forEach((place) => {
+                let marker = L.marker([place.latitude, place.longitude])
+                    .bindPopup(`<b>${place.place_name}</b><br>${place.description}`);
+
+                markers.addLayer(marker);
+                bounds.push([place.latitude, place.longitude]);
+            });
+
+            mainMap.addLayer(markers);
+            if (bounds.length > 0) {
+                mainMap.fitBounds(bounds);
+            }
+        }
+
+        document.getElementById("generateItinerary").addEventListener("click", generateItinerary);
+        mainMap.addLayer(markers);
+        loadTrips();
     </script>
 
 </body>

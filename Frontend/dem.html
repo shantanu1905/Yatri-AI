@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trip Itinerary</title>
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY&callback=initMap" async defer></script>
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Trip Itinerary</h1>
+    <div id="tripDetails"></div>
+    <h2>Map</h2>
+    <div id="map"></div>
+
+    <script>
+        async function fetchItinerary() {
+            const response = await fetch('/trips/generateitinerary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ "session_id": "e46c3e31-702c-4b3a-a746-2e2f6b08fce6" })
+            });
+
+            if (!response.ok) {
+                document.getElementById('tripDetails').innerHTML = "<p>Failed to fetch itinerary.</p>";
+                return;
+            }
+
+            const data = await response.json();
+            displayItinerary(data);
+            initMap(data.itinerary.attractions);
+        }
+
+        function displayItinerary(data) {
+            let tripInfo = `
+                <h2>Destination: ${data.destination}</h2>
+                <p><strong>Travel Dates:</strong> ${data.startdate} - ${data.enddate}</p>
+                <p><strong>Budget:</strong> $${data.budget}</p>
+                <p><strong>Travelers:</strong> ${data.travelers}</p>
+                <p><strong>Activities:</strong> ${data.activities.join(', ')}</p>
+                <h3>Itinerary</h3>
+                <p><strong>Location:</strong> ${data.itinerary.location_name}</p>
+                <p><strong>Description:</strong> ${data.itinerary.location_description}</p>
+                <p><strong>Ideal Visit Time:</strong> ${data.itinerary.ideal_visit_time}</p>
+                <h3>Attractions:</h3>
+                <ul>
+            `;
+
+            data.itinerary.attractions.forEach(attraction => {
+                tripInfo += `
+                    <li>
+                        <strong>${attraction.place_name}</strong><br>
+                        ${attraction.description}<br>
+                        <strong>Best Time:</strong> ${attraction.best_time_to_visit}<br>
+                        <strong>Nearby:</strong> ${attraction.nearby_points_of_interest}<br>
+                        <strong>Location:</strong> (${attraction.latitude}, ${attraction.longitude})
+                    </li><br>
+                `;
+            });
+
+            tripInfo += "</ul>";
+            document.getElementById('tripDetails').innerHTML = tripInfo;
+        }
+
+        function initMap(attractions = []) {
+            const map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 12,
+                center: { lat: attractions[0].latitude, lng: attractions[0].longitude } // Center map on first attraction
+            });
+
+            attractions.forEach(attraction => {
+                new google.maps.Marker({
+                    position: { lat: attraction.latitude, lng: attraction.longitude },
+                    map: map,
+                    title: attraction.place_name
+                });
+            });
+        }
+
+        window.onload = fetchItinerary;
+    </script>
+
+</body>
+</html>
