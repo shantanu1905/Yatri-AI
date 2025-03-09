@@ -1,5 +1,5 @@
 from crewai import Agent, LLM
-from tools import search_tool, image_tool
+from api.tools import search_tool
 from dotenv import load_dotenv
 import os
 
@@ -14,14 +14,23 @@ llm = LLM(
 # **Tourist Guide Agent** - Finds best places to visit
 tourist_guide = Agent(
     role="Tourist Guide",
-    goal="Discover the best tourist attractions and best time to visit {destination}.",
+    goal=(
+        "Discover the best tourist attractions and the best time to visit {destination}. "
+        "Provide tailored recommendations based on the traveler's details, including start date ({start_date}), "
+        "end date ({end_date}), budget ({budget}, optional), traveler type ({traveler_type}), "
+        "and preferred activities ({activities})."
+    ),
     verbose=True,
     memory=True,
-    backstory="An experienced travel blogger who knows the best places to explore.",
-    tools=[search_tool],  # Uses search
+    backstory=(
+        "An experienced travel blogger with extensive knowledge of destinations worldwide. "
+        "Provides personalized travel recommendations based on user preferences."
+    ),
+    tools=[search_tool],  # Uses both search and image search for better results
     llm=llm,
     allow_delegation=True
 )
+
 
 # **Travel Agent** - Finds travel options (bus, train, flight)
 travel_agent = Agent(
